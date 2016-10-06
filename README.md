@@ -98,3 +98,107 @@ dc2-1.dc2  10.40.0.101:8302  alive   server  0.7.0  2         dc2
 dc2-2.dc2  10.40.0.102:8302  alive   server  0.7.0  2         dc2
 dc2-3.dc2  10.40.0.103:8302  alive   server  0.7.0  2         dc2
 ```
+
+## Nomad
+
+`sudo mkdir /etc/nomad.d`
+
+### Nomad Servers on DC1
+
+In `/etc/nomad.d/base.hcl` (replace `COREOS_PRIVATE_IPV4` by the value)
+
+```hcl
+region = "europe"
+datacenter = "dc1"
+data_dir = "/opt/nomad/"
+bind_addr = "0.0.0.0"
+advertise {
+  http = "$COREOS_PRIVATE_IPV4:4646"
+  rpc  = "$COREOS_PRIVATE_IPV4:4647"
+  serf = "$COREOS_PRIVATE_IPV4:4648"
+}
+```
+
+In `/etc/nomad.d/server.hcl`
+
+```hcl
+# Setup data dir
+data_dir = "/tmp/server"
+datacenter = "dc1"
+# Enable the server
+server {
+  enabled          = true
+  bootstrap_expect = 3
+}
+```
+
+Launch the Nomad cluster in server mode on each node:
+
+```
+$ docker run -d --name=nomad -it --net=host -v /etc/nomad.d:/data sjourdan/nomad:0.4.1 agent -config /data/base.hcl -config /data/server.hcl
+```
+
+Verify it found a leader:
+
+```
+$ docker exec -it nomad nomad server-members
+Name          Address      Port  Status  Leader  Protocol  Build  Datacenter  Region
+dc1-1.europe  10.30.0.101  4648  alive   true    2         0.4.1  dc1         europe
+dc1-2.europe  10.30.0.102  4648  alive   false   2         0.4.1  dc1         europe
+dc1-3.europe  10.30.0.103  4648  alive   false   2         0.4.1  dc1         europe
+```
+
+### Nomad Clients on DC2
+
+sudo mkdir /etc/nomad.d
+
+In `/etc/nomad.d/base.hcl` (replace `COREOS_PRIVATE_IPV4` by the value)
+
+```hcl
+region = "europe"
+datacenter = "dc2"
+data_dir = "/opt/nomad/"
+bind_addr = "0.0.0.0"
+advertise {
+  http = "$COREOS_PRIVATE_IPV4:4646"
+  rpc  = "$COREOS_PRIVATE_IPV4:4647"
+  serf = "$COREOS_PRIVATE_IPV4:4648"
+}
+```
+
+In `/etc/nomad.d/client.hcl`
+
+```hcl
+datacenter = "dc2"
+
+client {
+    enabled = true
+    servers = ["10.30.0.101:4647", "10.30.0.102:4647", "10.30.0.103:4647"]
+}
+```
+
+Launch the Nomad cluster in client mode on each node:
+
+```
+$ docker run -d --name=nomad -it --net=host -v /run/docker.sock:/run/docker.sock -v /tmp:/tmp -v /etc/nomad.d:/data sjourdan/nomad:0.4.1 agent -config /data/base.hcl -config /data/client.hcl
+```
+
+Check node status:
+
+```
+docker exec -it nomad nomad node-status
+```
+
+## Schedule a job
+
+Load the job: 
+
+`docker exec -it nomad nomad run /data/nginx.nomad`
+
+See the job status:
+
+`docker exec -it nomad nomad status`
+
+Stop the job:
+
+`docker exec -it nomad nomad stop nginx`
